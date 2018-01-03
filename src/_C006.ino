@@ -76,6 +76,10 @@ boolean CPlugin_006(byte function, struct EventStruct *event, String& string)
 
     case CPLUGIN_PROTOCOL_SEND:
       {
+        if (WiFi.status() != WL_CONNECTED) {
+          success = false;
+          break;
+        }
         ControllerSettingsStruct ControllerSettings;
         LoadControllerSettings(event->ControllerIndex, (byte*)&ControllerSettings, sizeof(ControllerSettings));
 
@@ -99,7 +103,7 @@ boolean CPlugin_006(byte function, struct EventStruct *event, String& string)
           if (event->sensorType == SENSOR_TYPE_LONG)
             value = (unsigned long)UserVar[event->BaseVarIndex] + ((unsigned long)UserVar[event->BaseVarIndex + 1] << 16);
           else
-            value = toString(UserVar[event->BaseVarIndex + x], ExtraTaskSettings.TaskDeviceValueDecimals[x]);
+            value = formatUserVar(event, x);
           MQTTclient.publish(tmppubname.c_str(), value.c_str(), Settings.MQTTRetainFlag);
         }
         break;

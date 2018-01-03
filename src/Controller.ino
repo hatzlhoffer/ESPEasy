@@ -18,8 +18,8 @@ void sendData(struct EventStruct *event)
 
   if (Settings.MessageDelay != 0)
   {
-    uint16_t dif = millis() - lastSend;
-    if (dif < Settings.MessageDelay)
+    const long dif = timePassedSince(lastSend);
+    if (dif > 0 && dif < static_cast<long>(Settings.MessageDelay))
     {
       uint16_t delayms = Settings.MessageDelay - dif;
       //this is logged nowhere else, so might as well disable it here also:
@@ -27,7 +27,7 @@ void sendData(struct EventStruct *event)
       delayBackground(delayms);
 
       // unsigned long timer = millis() + delayms;
-      // while (millis() < timer)
+      // while (!timeOutReached(timer))
       //   backgroundtasks();
     }
   }
@@ -97,18 +97,24 @@ void callback(char* c_topic, byte* b_payload, unsigned int length) {
 \*********************************************************************************************/
 void MQTTConnect()
 {
+  if (WiFi.status() != WL_CONNECTED) return;
   ControllerSettingsStruct ControllerSettings;
   LoadControllerSettings(0, (byte*)&ControllerSettings, sizeof(ControllerSettings)); // todo index is now fixed to 0
 
-  IPAddress MQTTBrokerIP(ControllerSettings.IP);
-  MQTTclient.setServer(MQTTBrokerIP, ControllerSettings.Port);
+  if (ControllerSettings.UseDNS) {
+    MQTTclient.setServer(ControllerSettings.getHost().c_str(), ControllerSettings.Port);
+  } else {
+    MQTTclient.setServer(ControllerSettings.getIP(), ControllerSettings.Port);
+  }
   MQTTclient.setCallback(callback);
 
   // MQTT needs a unique clientname to subscribe to broker
-  String clientid = "ESPClient";
-  clientid += Settings.Unit;
+  String clientid = Settings.Name; // clientid = %sysname%
+  if (Settings.Unit != 0) // set unit number to zero if don't want to add to clientid
+  {
+    clientid += Settings.Unit;
+  }
   String subscribeTo = "";
-
   String LWTTopic = ControllerSettings.Subscribe;
   LWTTopic.replace(F("/#"), F("/status"));
   LWTTopic.replace(F("%sysname%"), Settings.Name);
@@ -119,13 +125,15 @@ void MQTTConnect()
     boolean MQTTresult = false;
 
     if ((SecuritySettings.ControllerUser[0] != 0) && (SecuritySettings.ControllerPassword[0] != 0))
-      MQTTresult = MQTTclient.connect(clientid.c_str(), SecuritySettings.ControllerUser[0], SecuritySettings.ControllerPassword[0], LWTTopic.c_str(), 0, 0, "Connection Lost");
+      MQTTresult = MQTTclient.connect(clientid.c_str(), SecuritySettings.ControllerUser[0], SecuritySettings.ControllerPassword[0], LWTTopic.c_str(), 0, 1, "Connection Lost");
     else
-      MQTTresult = MQTTclient.connect(clientid.c_str(), LWTTopic.c_str(), 0, 0, "Connection Lost");
+      MQTTresult = MQTTclient.connect(clientid.c_str(), LWTTopic.c_str(), 0, 1, "Connection Lost");
 
     if (MQTTresult)
     {
-      log = F("MQTT : Connected to broker");
+      log = F("MQTT : ClientID ");
+      log += clientid;
+      log += " connected to broker";
       addLog(LOG_LEVEL_INFO, log);
       subscribeTo = ControllerSettings.Subscribe;
       subscribeTo.replace(F("%sysname%"), Settings.Name);
@@ -134,14 +142,16 @@ void MQTTConnect()
       log += subscribeTo;
       addLog(LOG_LEVEL_INFO, log);
 
-      MQTTclient.publish(LWTTopic.c_str(), "Connected");
+      MQTTclient.publish(LWTTopic.c_str(), "Connected", 1);
 
       statusLED(true);
       break; // end loop if succesfull
     }
     else
     {
-      log = F("MQTT : Failed to connected to broker");
+      log = F("MQTT : ClientID ");
+      log += clientid;
+      log +=" failed to connected to broker";
       addLog(LOG_LEVEL_ERROR, log);
     }
 
@@ -158,14 +168,15 @@ void MQTTCheck()
   byte ProtocolIndex = getProtocolIndex(Settings.Protocol[0]);
   if (Protocol[ProtocolIndex].usesMQTT)
   {
-    if (!MQTTclient.connected())
+    if (!MQTTclient.connected() || WiFi.status() != WL_CONNECTED)
     {
-      String log = F("MQTT : Connection lost");
-      addLog(LOG_LEVEL_ERROR, log);
+      addLog(LOG_LEVEL_ERROR, F("MQTT : Connection lost"));
       connectionFailures += 2;
       MQTTclient.disconnect();
-      delay(1000);
-      MQTTConnect();
+      if (WiFi.status() == WL_CONNECTED) {
+        delay(1000);
+        MQTTConnect();
+      }
     }
     else if (connectionFailures)
       connectionFailures--;
