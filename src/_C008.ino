@@ -1,3 +1,4 @@
+#ifdef USES_C008
 //#######################################################################################################
 //########################### Controller Plugin 008: Generic HTTP #######################################
 //#######################################################################################################
@@ -43,10 +44,10 @@ boolean CPlugin_008(byte function, struct EventStruct *event, String& string)
         byte valueCount = getValueCountFromSensorType(event->sensorType);
         for (byte x = 0; x < valueCount; x++)
         {
-          if (event->sensorType == SENSOR_TYPE_LONG)
-            HTTPSend(event, 0, 0, (unsigned long)UserVar[event->BaseVarIndex] + ((unsigned long)UserVar[event->BaseVarIndex + 1] << 16));
-          else
-            HTTPSend(event, x, UserVar[event->BaseVarIndex + x], 0);
+          bool isvalid;
+          String formattedValue = formatUserVar(event, x, isvalid);
+          if (isvalid)
+            HTTPSend(event, x, formattedValue);
           if (valueCount > 1)
           {
             delayBackground(Settings.MessageDelay);
@@ -66,9 +67,9 @@ boolean CPlugin_008(byte function, struct EventStruct *event, String& string)
 //********************************************************************************
 // Generic HTTP get request
 //********************************************************************************
-boolean HTTPSend(struct EventStruct *event, byte varIndex, float value, unsigned long longValue)
+boolean HTTPSend(struct EventStruct *event, byte varIndex, const String& formattedValue)
 {
-  if (WiFi.status() != WL_CONNECTED) {
+  if (!WiFiConnected(100)) {
     return false;
   }
   ControllerSettingsStruct ControllerSettings;
@@ -105,15 +106,10 @@ boolean HTTPSend(struct EventStruct *event, byte varIndex, float value, unsigned
 
   String url = "/";
   url += ControllerSettings.Publish;
-  //TODO: move this to a generic replacement function?
-  url.replace(F("%sysname%"), URLEncode(Settings.Name));
-  url.replace(F("%tskname%"), URLEncode(ExtraTaskSettings.TaskDeviceName));
-  url.replace(F("%id%"), String(event->idx));
+  parseControllerVariables(url, event, true);
+
   url.replace(F("%valname%"), URLEncode(ExtraTaskSettings.TaskDeviceValueNames[varIndex]));
-  if (longValue)
-    url.replace(F("%value%"), String(longValue));
-  else
-    url.replace(F("%value%"), toString(value, ExtraTaskSettings.TaskDeviceValueDecimals[varIndex]));
+  url.replace(F("%value%"), formattedValue);
 
   // url.toCharArray(log, 80);
   addLog(LOG_LEVEL_DEBUG_MORE, url);
@@ -153,3 +149,4 @@ boolean HTTPSend(struct EventStruct *event, byte varIndex, float value, unsigned
 
   return(true);
 }
+#endif

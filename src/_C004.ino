@@ -1,3 +1,4 @@
+#ifdef USES_C004
 //#######################################################################################################
 //########################### Controller Plugin 004: ThingSpeak #########################################
 //#######################################################################################################
@@ -16,7 +17,7 @@ boolean CPlugin_004(byte function, struct EventStruct *event, String& string)
       {
         Protocol[++protocolCount].Number = CPLUGIN_ID_004;
         Protocol[protocolCount].usesMQTT = false;
-        Protocol[protocolCount].usesAccount = false;
+        Protocol[protocolCount].usesAccount = true;
         Protocol[protocolCount].usesPassword = true;
         Protocol[protocolCount].defaultPort = 80;
         Protocol[protocolCount].usesID = true;
@@ -27,6 +28,22 @@ boolean CPlugin_004(byte function, struct EventStruct *event, String& string)
       {
         string = F(CPLUGIN_NAME_004);
         break;
+      }
+
+    case CPLUGIN_GET_PROTOCOL_DISPLAY_NAME:
+      {
+        success = true;
+        switch (event->idx) {
+          case CONTROLLER_USER:
+            string = F("ThingHTTP Name");
+            break;
+          case CONTROLLER_PASS:
+            string = F("API Key");
+            break;
+          default:
+            success = false;
+            break;
+        }
       }
 
     case CPLUGIN_PROTOCOL_SEND:
@@ -59,7 +76,7 @@ boolean CPlugin_004(byte function, struct EventStruct *event, String& string)
           postDataStr += F("&field");
           postDataStr += event->idx + x;
           postDataStr += "=";
-          postDataStr += formatUserVar(event, x);
+          postDataStr += formatUserVarNoCheck(event, x);
         }
         String hostName = F("api.thingspeak.com"); // PM_CZ: HTTP requests must contain host headers.
         if (ControllerSettings.UseDNS)
@@ -111,3 +128,4 @@ boolean CPlugin_004(byte function, struct EventStruct *event, String& string)
   }
   return success;
 }
+#endif

@@ -1,3 +1,4 @@
+#ifdef USES_P056
 //#######################################################################################################
 //#################################### Plugin 056: Dust Sensor SDS011 / SDS018 ##########################
 //#######################################################################################################
@@ -9,11 +10,10 @@
   DevicePin1 - RX on ESP, TX on SDS
 */
 
-#ifdef PLUGIN_BUILD_TESTING
 
 #define PLUGIN_056
 #define PLUGIN_ID_056         56
-#define PLUGIN_NAME_056       "Dust - SDS011/018/198 [TESTING]"
+#define PLUGIN_NAME_056       "Dust - SDS011/018/198"
 #define PLUGIN_VALUENAME1_056 "PM2.5"   // Dust <2.5µm in µg/m³   SDS198:<100µm in µg/m³
 #define PLUGIN_VALUENAME2_056 "PM10"    // Dust <10µm in µg/m³
 
@@ -62,11 +62,11 @@ boolean Plugin_056(byte function, struct EventStruct *event, String& string)
     case PLUGIN_WEBFORM_LOAD:
       {
         if (Plugin_056_hasTxPin(event)) {
-          addFormNumericBox(string, F("Sleep time"), F("plugin_056_sleeptime"),
+          addFormNumericBox(F("Sleep time"), F("plugin_056_sleeptime"),
                             Settings.TaskDevicePluginConfig[event->TaskIndex][0],
                             0, 30);
-          addUnit(string, F("Minutes"));
-          addFormNote(string, F("0 = continous, 1..30 = Work 30 seconds and sleep n*60-30 seconds"));
+          addUnit(F("Minutes"));
+          addFormNote(F("0 = continous, 1..30 = Work 30 seconds and sleep n*60-30 seconds"));
         }
         break;
       }
@@ -109,9 +109,12 @@ boolean Plugin_056(byte function, struct EventStruct *event, String& string)
 
     case PLUGIN_EXIT:
       {
-        if (Plugin_056_SDS)
-          delete Plugin_056_SDS;
-        addLog(LOG_LEVEL_INFO, F("SDS  : Exit"));
+        // //FIXME: if this plugin is used more than once at the same time, things go horribly wrong :)
+        //
+        // if (Plugin_056_SDS)
+        //   delete Plugin_056_SDS;
+        // addLog(LOG_LEVEL_INFO, F("SDS  : Exit"));
+        shouldReboot=true;
         break;
       }
 
@@ -200,4 +203,4 @@ void Plugin_056_setWorkingPeriod(int minutes) {
   addLog(LOG_LEVEL_INFO, log);
 }
 
-#endif   //PLUGIN_BUILD_TESTING
+#endif // USES_P056
