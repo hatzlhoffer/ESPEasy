@@ -1,4 +1,7 @@
 #ifdef USES_C013
+
+#include "src/Globals/Nodes.h"
+
 //#######################################################################################################
 //########################### Controller Plugin 013: ESPEasy P2P network ################################
 //#######################################################################################################
@@ -9,7 +12,7 @@
 
 WiFiUDP C013_portUDP;
 
-struct infoStruct
+struct C013_SensorInfoStruct
 {
   byte header = 255;
   byte ID = 3;
@@ -22,7 +25,7 @@ struct infoStruct
   char ValueNames[VARS_PER_TASK][26];
 };
 
-struct dataStruct
+struct C013_SensorDataStruct
 {
   byte header = 255;
   byte ID = 5;
@@ -34,9 +37,9 @@ struct dataStruct
 };
 
 
-boolean CPlugin_013(byte function, struct EventStruct *event, String& string)
+bool CPlugin_013(byte function, struct EventStruct *event, String& string)
 {
-  boolean success = false;
+  bool success = false;
 
   switch (function)
   {
@@ -80,7 +83,7 @@ boolean CPlugin_013(byte function, struct EventStruct *event, String& string)
 
     case CPLUGIN_PROTOCOL_SEND:
       {
-        C013_Send(event, 0, UserVar[event->BaseVarIndex], 0);
+        C013_SendUDPTaskData(0, event->TaskIndex, event->TaskIndex);
         break;
       }
 
@@ -90,6 +93,14 @@ boolean CPlugin_013(byte function, struct EventStruct *event, String& string)
         break;
       }
 
+/*
+    case CPLUGIN_FLUSH:
+      {
+        process_c013_delay_queue();
+        delay(0);
+        break;
+      }
+*/
   }
   return success;
 }
@@ -98,42 +109,41 @@ boolean CPlugin_013(byte function, struct EventStruct *event, String& string)
 //********************************************************************************
 // Generic UDP message
 //********************************************************************************
-void C013_Send(struct EventStruct *event, byte varIndex, float value, unsigned long longValue)
-{
-  ControllerSettingsStruct ControllerSettings;
-  LoadControllerSettings(event->ControllerIndex, (byte*)&ControllerSettings, sizeof(ControllerSettings));
-  statusLED(true);
-  C013_SendUDPTaskData(0, event->TaskIndex, event->TaskIndex);
-}
-
 void C013_SendUDPTaskInfo(byte destUnit, byte sourceTaskIndex, byte destTaskIndex)
 {
-  if (!WiFiConnected(100)) {
+  if (!WiFiConnected(10)) {
     return;
   }
-  struct infoStruct infoReply;
+  if (!validTaskIndex(sourceTaskIndex) || !validTaskIndex(destTaskIndex)) {
+    return;
+  }
+  pluginID_t pluginID = Settings.TaskDeviceNumber[sourceTaskIndex];
+  if (!validPluginID(pluginID)) {
+    return;
+  }
+
+  struct C013_SensorInfoStruct infoReply;
   infoReply.sourcelUnit = Settings.Unit;
   infoReply.sourceTaskIndex = sourceTaskIndex;
   infoReply.destTaskIndex = destTaskIndex;
+  infoReply.deviceNumber = pluginID;
   LoadTaskSettings(infoReply.sourceTaskIndex);
-  infoReply.deviceNumber = Settings.TaskDeviceNumber[infoReply.sourceTaskIndex];
-  strcpy(infoReply.taskName, ExtraTaskSettings.TaskDeviceName);
+  strcpy(infoReply.taskName, getTaskDeviceName(infoReply.sourceTaskIndex).c_str());
   for (byte x = 0; x < VARS_PER_TASK; x++)
     strcpy(infoReply.ValueNames[x], ExtraTaskSettings.TaskDeviceValueNames[x]);
 
-  byte firstUnit = 1;
-  byte lastUnit = UNIT_MAX - 1;
   if (destUnit != 0)
   {
-    firstUnit = destUnit;
-    lastUnit = destUnit;
-  }
-  for (byte x = firstUnit; x <= lastUnit; x++)
-  {
-    if (x != Settings.Unit){
-      infoReply.destUnit = x;
-      C013_sendUDP(x, (byte*)&infoReply, sizeof(infoStruct));
-      delay(10);
+    infoReply.destUnit = destUnit;
+    C013_sendUDP(destUnit, (byte*)&infoReply, sizeof(C013_SensorInfoStruct));
+    delay(10);
+  } else {
+    for (NodesMap::iterator it = Nodes.begin(); it != Nodes.end(); ++it) {
+      if (it->first != Settings.Unit) {
+        infoReply.destUnit = it->first;
+        C013_sendUDP(it->first, (byte*)&infoReply, sizeof(C013_SensorInfoStruct));
+        delay(10);
+      }
     }
   }
   delay(50);
@@ -141,29 +151,28 @@ void C013_SendUDPTaskInfo(byte destUnit, byte sourceTaskIndex, byte destTaskInde
 
 void C013_SendUDPTaskData(byte destUnit, byte sourceTaskIndex, byte destTaskIndex)
 {
-  if (!WiFiConnected(100)) {
+  if (!WiFiConnected(10)) {
     return;
   }
-  struct dataStruct dataReply;
+  struct C013_SensorDataStruct dataReply;
   dataReply.sourcelUnit = Settings.Unit;
   dataReply.sourceTaskIndex = sourceTaskIndex;
   dataReply.destTaskIndex = destTaskIndex;
   for (byte x = 0; x < VARS_PER_TASK; x++)
     dataReply.Values[x] = UserVar[dataReply.sourceTaskIndex * VARS_PER_TASK + x];
 
-  byte firstUnit = 1;
-  byte lastUnit = UNIT_MAX - 1;
   if (destUnit != 0)
   {
-    firstUnit = destUnit;
-    lastUnit = destUnit;
-  }
-  for (byte x = firstUnit; x <= lastUnit; x++)
-  {
-    if (x != Settings.Unit){
-      dataReply.destUnit = x;
-      C013_sendUDP(x, (byte*) &dataReply, sizeof(dataStruct));
-      delay(10);
+    dataReply.destUnit = destUnit;
+    C013_sendUDP(destUnit, (byte*) &dataReply, sizeof(C013_SensorDataStruct));
+    delay(10);
+  } else {
+    for (NodesMap::iterator it = Nodes.begin(); it != Nodes.end(); ++it) {
+      if (it->first != Settings.Unit) {
+        dataReply.destUnit = it->first;
+        C013_sendUDP(it->first, (byte*) &dataReply, sizeof(C013_SensorDataStruct));
+        delay(10);
+      }
     }
   }
   delay(50);
@@ -174,15 +183,24 @@ void C013_SendUDPTaskData(byte destUnit, byte sourceTaskIndex, byte destTaskInde
   \*********************************************************************************************/
 void C013_sendUDP(byte unit, byte* data, byte size)
 {
-  if (!WiFiConnected(100)) {
+  if (!WiFiConnected(10)) {
     return;
   }
-  if (unit != 255)
-    if (Nodes[unit].ip[0] == 0)
+  NodesMap::iterator it;
+  if (unit != 255) {
+    it = Nodes.find(unit);
+    if (it == Nodes.end())
       return;
-  String log = F("C013 : Send UDP message to ");
-  log += unit;
-  addLog(LOG_LEVEL_DEBUG_MORE, log);
+    if (it->second.ip[0] == 0)
+      return;
+  }
+#ifndef BUILD_NO_DEBUG
+  if (loglevelActiveFor(LOG_LEVEL_DEBUG_MORE)) {
+    String log = F("C013 : Send UDP message to ");
+    log += unit;
+    addLog(LOG_LEVEL_DEBUG_MORE, log);
+  }
+#endif
 
   statusLED(true);
 
@@ -190,24 +208,30 @@ void C013_sendUDP(byte unit, byte* data, byte size)
   if (unit == 255)
     remoteNodeIP = {255, 255, 255, 255};
   else
-    remoteNodeIP = Nodes[unit].ip;
-  C013_portUDP.beginPacket(remoteNodeIP, Settings.UDPPort);
+    remoteNodeIP = it->second.ip;
+  if (!beginWiFiUDP_randomPort(C013_portUDP)) return;
+  if (C013_portUDP.beginPacket(remoteNodeIP, Settings.UDPPort) == 0) return;
   C013_portUDP.write(data, size);
   C013_portUDP.endPacket();
+  C013_portUDP.stop();
 }
 
 void C013_Receive(struct EventStruct *event) {
-
-  if (event->Data[1] > 1 && event->Data[1] < 6)
-  {
-    String log = (F("C013 : msg "));
-    for (byte x = 1; x < 6; x++)
+  if (event->Par2 < 6) return;
+#ifndef BUILD_NO_DEBUG
+  if (loglevelActiveFor(LOG_LEVEL_DEBUG_MORE)) {
+    if (event->Data[1] > 1 && event->Data[1] < 6)
     {
-      log += " ";
-      log += (int)event->Data[x];
+      String log = (F("C013 : msg "));
+      for (byte x = 1; x < 6; x++)
+      {
+        log += ' ';
+        log += (int)event->Data[x];
+      }
+      addLog(LOG_LEVEL_DEBUG_MORE, log);
     }
-    addLog(LOG_LEVEL_DEBUG_MORE, log);
   }
+#endif
 
   switch (event->Data[1]) {
     case 2: // sensor info pull request
@@ -218,22 +242,32 @@ void C013_Receive(struct EventStruct *event) {
 
     case 3: // sensor info
       {
-        struct infoStruct infoReply;
-        memcpy((byte*)&infoReply, (byte*)event->Data, sizeof(infoStruct));
+        struct C013_SensorInfoStruct infoReply;
+        if (static_cast<size_t>(event->Par2) < sizeof(C013_SensorInfoStruct)) {
+#ifndef BUILD_NO_DEBUG
+          addLog(LOG_LEVEL_DEBUG, F("C013_Receive: Received data smaller than C013_SensorInfoStruct, discarded"));
+#endif
+        } else {
+          memcpy((byte*)&infoReply, (byte*)event->Data, sizeof(C013_SensorInfoStruct));
 
-        // to prevent flash wear out (bugs in communication?) we can only write to an empty task
-        // so it will write only once and has to be cleared manually through webgui
-        if (Settings.TaskDeviceNumber[infoReply.destTaskIndex] == 0)
-        {
-          Settings.TaskDeviceNumber[infoReply.destTaskIndex] = infoReply.deviceNumber;
-          Settings.TaskDeviceDataFeed[infoReply.destTaskIndex] = 1;  // remote feed
-          for (byte x = 0; x < CONTROLLER_MAX; x++)
-            Settings.TaskDeviceSendData[x][infoReply.destTaskIndex] = false;
-          strcpy(ExtraTaskSettings.TaskDeviceName, infoReply.taskName);
-          for (byte x = 0; x < VARS_PER_TASK; x++)
-            strcpy( ExtraTaskSettings.TaskDeviceValueNames[x], infoReply.ValueNames[x]);
-          SaveTaskSettings(infoReply.destTaskIndex);
-          SaveSettings();
+          // to prevent flash wear out (bugs in communication?) we can only write to an empty task
+          // so it will write only once and has to be cleared manually through webgui
+          // Also check the receiving end does support the plugin ID.
+          if (!validPluginID(Settings.TaskDeviceNumber[infoReply.destTaskIndex]) &&
+              supportedPluginID(infoReply.deviceNumber))
+          {
+            taskClear(infoReply.destTaskIndex, false);
+            Settings.TaskDeviceNumber[infoReply.destTaskIndex] = infoReply.deviceNumber;
+            Settings.TaskDeviceDataFeed[infoReply.destTaskIndex] = infoReply.sourcelUnit;  // remote feed store unit nr sending the data
+            for (byte x = 0; x < CONTROLLER_MAX; x++)
+              Settings.TaskDeviceSendData[x][infoReply.destTaskIndex] = false;
+            strcpy(ExtraTaskSettings.TaskDeviceName, infoReply.taskName);
+            for (byte x = 0; x < VARS_PER_TASK; x++)
+              strcpy( ExtraTaskSettings.TaskDeviceValueNames[x], infoReply.ValueNames[x]);
+            ExtraTaskSettings.TaskIndex = infoReply.destTaskIndex;
+            SaveTaskSettings(infoReply.destTaskIndex);
+            SaveSettings();
+          }
         }
         break;
       }
@@ -246,18 +280,28 @@ void C013_Receive(struct EventStruct *event) {
 
     case 5: // sensor data
       {
-        struct dataStruct dataReply;
-        memcpy((byte*)&dataReply, (byte*)event->Data, sizeof(dataStruct));
+        struct C013_SensorDataStruct dataReply;
+        if (static_cast<size_t>(event->Par2) < sizeof(C013_SensorDataStruct)) {
+#ifndef BUILD_NO_DEBUG
+          addLog(LOG_LEVEL_DEBUG, F("C013_Receive: Received data smaller than C013_SensorDataStruct, discarded"));
+#endif
+        } else {
+          memcpy((byte*)&dataReply, (byte*)event->Data, sizeof(C013_SensorDataStruct));
 
-        // only if this task has a remote feed, update values
-        if (Settings.TaskDeviceDataFeed[dataReply.destTaskIndex] != 0)
-        {
-          for (byte x = 0; x < VARS_PER_TASK; x++)
+          // only if this task has a remote feed, update values
+          const byte remoteFeed = Settings.TaskDeviceDataFeed[dataReply.destTaskIndex];
+          if (remoteFeed != 0 && remoteFeed == dataReply.sourcelUnit)
           {
-            UserVar[dataReply.destTaskIndex * VARS_PER_TASK + x] = dataReply.Values[x];
+            struct EventStruct TempEvent;
+            for (byte x = 0; x < VARS_PER_TASK; x++)
+            {
+              UserVar[dataReply.destTaskIndex * VARS_PER_TASK + x] = dataReply.Values[x];
+            }
+            if (Settings.UseRules) {
+              TempEvent.TaskIndex = dataReply.destTaskIndex;
+              createRuleEvents(&TempEvent);
+            }
           }
-          if (Settings.UseRules)
-            createRuleEvents(dataReply.destTaskIndex);
         }
         break;
       }

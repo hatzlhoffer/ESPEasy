@@ -7,9 +7,9 @@
 #define CPLUGIN_ID_006         6
 #define CPLUGIN_NAME_006       "PiDome MQTT"
 
-boolean CPlugin_006(byte function, struct EventStruct *event, String& string)
+bool CPlugin_006(byte function, struct EventStruct *event, String& string)
 {
-  boolean success = false;
+  bool success = false;
 
   switch (function)
   {
@@ -28,6 +28,14 @@ boolean CPlugin_006(byte function, struct EventStruct *event, String& string)
     case CPLUGIN_GET_DEVICENAME:
       {
         string = F(CPLUGIN_NAME_006);
+        break;
+      }
+
+    case CPLUGIN_INIT:
+      {
+        MakeControllerSettings(ControllerSettings);
+        LoadControllerSettings(event->ControllerIndex, ControllerSettings);
+        MQTTDelayHandler.configureControllerSettings(ControllerSettings);
         break;
       }
 
@@ -58,6 +66,7 @@ boolean CPlugin_006(byte function, struct EventStruct *event, String& string)
         String name = topicSplit[4];
         String cmd = topicSplit[5];
         struct EventStruct TempEvent;
+        TempEvent.TaskIndex = event->TaskIndex;
         TempEvent.Par1 = topicSplit[6].toInt();
         TempEvent.Par2 = 0;
         TempEvent.Par3 = 0;
@@ -77,23 +86,24 @@ boolean CPlugin_006(byte function, struct EventStruct *event, String& string)
 
     case CPLUGIN_PROTOCOL_SEND:
       {
-        if (!WiFiConnected(100)) {
+        if (!WiFiConnected(10)) {
           success = false;
           break;
         }
-        ControllerSettingsStruct ControllerSettings;
-        LoadControllerSettings(event->ControllerIndex, (byte*)&ControllerSettings, sizeof(ControllerSettings));
+        MakeControllerSettings(ControllerSettings);
+        LoadControllerSettings(event->ControllerIndex, ControllerSettings);
 
         statusLED(true);
 
-        if (ExtraTaskSettings.TaskDeviceValueNames[0][0] == 0)
-          PluginCall(PLUGIN_GET_DEVICEVALUENAMES, event, dummyString);
+        if (ExtraTaskSettings.TaskIndex != event->TaskIndex) {
+          String dummy;
+          PluginCall(PLUGIN_GET_DEVICEVALUENAMES, event, dummy);
+        }
 
         String pubname = ControllerSettings.Publish;
         parseControllerVariables(pubname, event, false);
 
         String value = "";
-        // byte DeviceIndex = getDeviceIndex(Settings.TaskDeviceNumber[event->TaskIndex]);
         byte valueCount = getValueCountFromSensorType(event->sensorType);
         for (byte x = 0; x < valueCount; x++)
         {
@@ -104,6 +114,14 @@ boolean CPlugin_006(byte function, struct EventStruct *event, String& string)
         }
         break;
       }
+
+    case CPLUGIN_FLUSH:
+      {
+        processMQTTdelayQueue();
+        delay(0);
+        break;
+      }
+
   }
   return success;
 }

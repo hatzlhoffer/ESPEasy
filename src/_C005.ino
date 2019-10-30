@@ -1,15 +1,15 @@
 #ifdef USES_C005
 //#######################################################################################################
-//########################### Controller Plugin 005: OpenHAB MQTT #######################################
+//################### Controller Plugin 005: Home Assistant (openHAB) MQTT ##############################
 //#######################################################################################################
 
 #define CPLUGIN_005
 #define CPLUGIN_ID_005         5
-#define CPLUGIN_NAME_005       "OpenHAB MQTT"
+#define CPLUGIN_NAME_005       "Home Assistant (openHAB) MQTT"
 
-boolean CPlugin_005(byte function, struct EventStruct *event, String& string)
+bool CPlugin_005(byte function, struct EventStruct *event, String& string)
 {
-  boolean success = false;
+  bool success = false;
 
   switch (function)
   {
@@ -31,10 +31,18 @@ boolean CPlugin_005(byte function, struct EventStruct *event, String& string)
         break;
       }
 
+    case CPLUGIN_INIT:
+      {
+        MakeControllerSettings(ControllerSettings);
+        LoadControllerSettings(event->ControllerIndex, ControllerSettings);
+        MQTTDelayHandler.configureControllerSettings(ControllerSettings);
+        break;
+      }
+
     case CPLUGIN_PROTOCOL_TEMPLATE:
       {
-        event->String1 = F("/%sysname%/#");
-        event->String2 = F("/%sysname%/%tskname%/%valname%");
+        event->String1 = F("%sysname%/#");
+        event->String2 = F("%sysname%/%tskname%/%valname%");
         break;
       }
 
@@ -47,6 +55,7 @@ boolean CPlugin_005(byte function, struct EventStruct *event, String& string)
         } else {
           String cmd;
           struct EventStruct TempEvent;
+          TempEvent.TaskIndex = event->TaskIndex;
           bool validTopic = false;
           const int lastindex = event->String1.lastIndexOf('/');
           const String lastPartTopic = event->String1.substring(lastindex + 1);
@@ -83,23 +92,23 @@ boolean CPlugin_005(byte function, struct EventStruct *event, String& string)
 
     case CPLUGIN_PROTOCOL_SEND:
       {
-        if (!WiFiConnected(100)) {
-          success = false;
-          break;
+        MakeControllerSettings(ControllerSettings);
+        LoadControllerSettings(event->ControllerIndex, ControllerSettings);
+        if (!ControllerSettings.checkHostReachable(true)) {
+            success = false;
+            break;
         }
-        ControllerSettingsStruct ControllerSettings;
-        LoadControllerSettings(event->ControllerIndex, (byte*)&ControllerSettings, sizeof(ControllerSettings));
-
         statusLED(true);
 
-        if (ExtraTaskSettings.TaskDeviceValueNames[0][0] == 0)
-          PluginCall(PLUGIN_GET_DEVICEVALUENAMES, event, dummyString);
+        if (ExtraTaskSettings.TaskIndex != event->TaskIndex) {
+          String dummy;
+          PluginCall(PLUGIN_GET_DEVICEVALUENAMES, event, dummy);
+        }
 
         String pubname = ControllerSettings.Publish;
         parseControllerVariables(pubname, event, false);
 
         String value = "";
-        // byte DeviceIndex = getDeviceIndex(Settings.TaskDeviceNumber[event->TaskIndex]);
         byte valueCount = getValueCountFromSensorType(event->sensorType);
         for (byte x = 0; x < valueCount; x++)
         {
@@ -108,14 +117,24 @@ boolean CPlugin_005(byte function, struct EventStruct *event, String& string)
           value = formatUserVarNoCheck(event, x);
 
           MQTTpublish(event->ControllerIndex, tmppubname.c_str(), value.c_str(), Settings.MQTTRetainFlag);
+#ifndef BUILD_NO_DEBUG
           String log = F("MQTT : ");
           log += tmppubname;
-          log += " ";
+          log += ' ';
           log += value;
           addLog(LOG_LEVEL_DEBUG, log);
+#endif
         }
         break;
       }
+
+    case CPLUGIN_FLUSH:
+      {
+        processMQTTdelayQueue();
+        delay(0);
+        break;
+      }
+
   }
 
   return success;

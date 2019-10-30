@@ -9,7 +9,7 @@
   This plugin reads the particle concentration from SDS011 Sensor
   DevicePin1 - RX on ESP, TX on SDS
 */
-
+#ifdef ESP8266  // Needed for precompile issues.
 
 #define PLUGIN_056
 #define PLUGIN_ID_056         56
@@ -59,11 +59,28 @@ boolean Plugin_056(byte function, struct EventStruct *event, String& string)
         strcpy_P(ExtraTaskSettings.TaskDeviceValueNames[1], PSTR(PLUGIN_VALUENAME2_056));
         break;
       }
+
+    case PLUGIN_GET_DEVICEGPIONAMES:
+      {
+        serialHelper_getGpioNames(event, false, true); // TX optional
+        break;
+      }
+
+    case PLUGIN_WEBFORM_SHOW_CONFIG:
+      {
+        string += serialHelper_getSerialTypeLabel(event);
+        success = true;
+        break;
+      }
+
     case PLUGIN_WEBFORM_LOAD:
       {
+        serialHelper_webformLoad(event);
+
+        // FIXME TD-er:  Whether TX pin is connected should be set somewhere
         if (Plugin_056_hasTxPin(event)) {
-          addFormNumericBox(F("Sleep time"), F("plugin_056_sleeptime"),
-                            Settings.TaskDevicePluginConfig[event->TaskIndex][0],
+          addFormNumericBox(F("Sleep time"), F("p056_sleeptime"),
+                            PCONFIG(0),
                             0, 30);
           addUnit(F("Minutes"));
           addFormNote(F("0 = continous, 1..30 = Work 30 seconds and sleep n*60-30 seconds"));
@@ -72,30 +89,26 @@ boolean Plugin_056(byte function, struct EventStruct *event, String& string)
       }
       case PLUGIN_WEBFORM_SAVE:
         {
+          serialHelper_webformSave(event);
+
           if (Plugin_056_hasTxPin(event)) {
             // Communications to device should work.
-            const int newsleeptime = getFormItemInt(F("plugin_056_sleeptime"));
-            if (Settings.TaskDevicePluginConfig[event->TaskIndex][0] != newsleeptime) {
-              Settings.TaskDevicePluginConfig[event->TaskIndex][0] = getFormItemInt(F("plugin_056_sleeptime"));
+            const int newsleeptime = getFormItemInt(F("p056_sleeptime"));
+            if (PCONFIG(0) != newsleeptime) {
+              PCONFIG(0) = getFormItemInt(F("p056_sleeptime"));
               Plugin_056_setWorkingPeriod(newsleeptime);
             }
           }
           success = true;
           break;
         }
-    case PLUGIN_GET_DEVICEGPIONAMES:
-      {
-        event->String1 = F("GPIO &larr; TX");
-        event->String2 = F("GPIO &#8674; RX (optional)");
-        break;
-      }
 
     case PLUGIN_INIT:
       {
         if (Plugin_056_SDS)
           delete Plugin_056_SDS;
-        const int16_t serial_rx = Settings.TaskDevicePin1[event->TaskIndex];
-        const int16_t serial_tx = Settings.TaskDevicePin2[event->TaskIndex];
+        const int16_t serial_rx = CONFIG_PIN1;
+        const int16_t serial_tx = CONFIG_PIN2;
         Plugin_056_SDS = new CjkSDS011(serial_rx, serial_tx);
         String log = F("SDS  : Init OK  ESP GPIO-pin RX:");
         log += serial_rx;
@@ -131,7 +144,7 @@ boolean Plugin_056(byte function, struct EventStruct *event, String& string)
           const float pm10 = Plugin_056_SDS->GetPM10_();
           String log = F("SDS  : act ");
           log += pm2_5;
-          log += F(" ");
+          log += ' ';
           log += pm10;
           addLog(LOG_LEVEL_DEBUG, log);
 
@@ -167,7 +180,7 @@ boolean Plugin_056(byte function, struct EventStruct *event, String& string)
 }
 
 boolean Plugin_056_hasTxPin(struct EventStruct *event) {
-  const int16_t serial_tx = Settings.TaskDevicePin2[event->TaskIndex];
+  const int16_t serial_tx = CONFIG_PIN2;
   return serial_tx >= 0;
 }
 
@@ -204,3 +217,4 @@ void Plugin_056_setWorkingPeriod(int minutes) {
 }
 
 #endif // USES_P056
+#endif

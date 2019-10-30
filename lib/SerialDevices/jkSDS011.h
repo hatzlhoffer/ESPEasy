@@ -22,14 +22,14 @@
   License along with MechInputs.  If not, see
   <http://www.gnu.org/licenses/>.
   -------------------------------------------------------------------------*/
-
+#ifdef ESP8266  // Needed for precompile issues.
 #ifndef _jkSDS011_H_
 #define _jkSDS011_H_
 
 #include "Arduino.h"
 //#include "SensorSerial.h"
 #include "SensorSerialBuffer.h"
-#include "ESPeasySoftwareSerial.h"
+#include "ESPeasySerial.h"
 
 
 class CjkSDS011
@@ -64,7 +64,7 @@ private:
   void ParseCommandReply();
 
 //  SensorSerial _serial;
-  ESPeasySoftwareSerial *_serial;
+  ESPeasySerial *_serial;
   CSensorSerialBuffer _data;
   CSensorSerialBuffer _command;
   float _pm2_5;
@@ -78,4 +78,5 @@ private:
   boolean _sleepmode_active;
 };
 
+#endif
 #endif
